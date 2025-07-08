@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>מערכת ניהול נבחנות</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { font-family: 'Heebo', sans-serif; background-color: #f7fafc; }
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e0; border-radius: 4px; }
+        .loader { border: 4px solid #f3f3f3; border-radius: 50%; border-top: 4px solid #4299e1; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        #toast { position: fixed; bottom: -100px; left: 50%; transform: translateX(-50%); padding: 12px 24px; border-radius: 8px; background-color: #2d3748; color: white; font-weight: 500; transition: bottom 0.5s ease-in-out; z-index: 200; }
+        #toast.show { bottom: 30px; }
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
+        .pulsing-loader { width: 20px; height: 20px; border-radius: 50%; background: white; animation: pulse 1.5s infinite; }
+        @keyframes pulse { from { transform: scale(0.5); opacity: 1; } to { transform: scale(1.5); opacity: 0; } }
+        .answers-table td, .answers-table th { padding: 0.75rem 1.5rem; vertical-align: top; border-bottom: 1px solid #e2e8f0; text-align: right; }
+        .animate-spin { animation: spin 1s linear infinite; }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <div id="token-modal" class="modal-overlay hidden">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-lg text-center">
+            <h3 class="text-2xl font-bold text-gray-800">נדרש טוקן גישה</h3>
+            <p class="my-4">כדי להשתמש במערכת, עליך להזין את טוקן הגישה האישי שלך.</p>
+            <p class="text-sm text-gray-600">ניתן לקבל את הטוקן דרך כתובת ה-WebApp של פרויקט הסקריפט.</p>
+            <input type="text" id="token-input" placeholder="הדבק כאן את טוקן הגישה" class="mt-4 w-full p-2 border border-gray-300 rounded-lg text-center">
+            <button id="save-token-btn" class="mt-4 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 font-bold">שמור והתחבר</button>
+        </div>
+    </div>
+
+    <div id="app" class="flex h-screen hidden">
+        <aside class="w-1/3 max-w-sm bg-white shadow-lg flex flex-col">
+            <div class="p-4 border-b sticky top-0 bg-white z-10">
+                <h2 class="text-2xl font-bold text-blue-600">רשימת נבחנות</h2>
+                <input type="text" id="search-input" placeholder="חיפוש לפי שם..." class="mt-3 w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition">
+                <div class="flex space-x-2 space-x-reverse mt-3">
+                    <button id="filter-all" class="filter-btn flex-1 px-3 py-1 bg-blue-500 text-white rounded-md text-sm">הכל</button>
+                    <button id="filter-new" class="filter-btn flex-1 px-3 py-1 bg-gray-200 text-gray-700 rounded-md text-sm">חדשות</button>
+                    <button id="filter-checked" class="filter-btn flex-1 px-3 py-1 bg-gray-200 text-gray-700 rounded-md text-sm">נבדקו</button>
+                    <button id="filter-followup" class="filter-btn flex-1 px-3 py-1 bg-gray-200 text-gray-700 rounded-md text-sm">מעקב</button>
+                </div>
+                <div id="user-info-display" class="mt-4 text-sm text-gray-600 text-center p-2 bg-gray-50 rounded-md" style="display: none;"></div>
+            </div>
+            <div id="examinee-list" class="flex-grow p-2 custom-scrollbar overflow-y-auto">
+                <div id="list-loader-container" class="flex justify-center items-center h-full">
+                    <div class="loader"></div>
+                </div>
+            </div>
+        </aside>
+
+        <main id="main-content" class="flex-1 p-6 lg:p-8 bg-gray-50 custom-scrollbar overflow-y-auto"></main>
+    </div>
+    
+    <div id="toast"></div>
+
+    <div id="ai-modal" class="modal-overlay hidden">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-3xl transform transition-all" dir="rtl">
+            <div class="flex justify-between items-center border-b pb-3 mb-4">
+                <h3 class="text-2xl font-bold text-gray-800 flex items-center"><i data-lucide="brain-circuit" class="ml-3 text-blue-500"></i>הפקת דוח אבחון</h3>
+                <button id="close-ai-modal-btn" class="text-gray-500 hover:text-gray-800 text-3xl">&times;</button>
+            </div>
+            <form id="ai-form">
+                <div id="image-options" class="mb-4 p-3 bg-gray-50 rounded-lg">
+                    <h4 class="font-semibold mb-2">מקורות מידע לאבחון:</h4>
+                    <div class="space-y-2">
+                        <label class="flex items-center"><input type="checkbox" id="include-questionnaire" checked class="ml-2">ניתוח שאלון</label>
+                        <label id="handwriting-option" class="hidden items-center"><input type="checkbox" id="include-handwriting" class="ml-2">ניתוח כתב יד</label>
+                        <label id="drawing-option" class="hidden items-center"><input type="checkbox" id="include-drawing" class="ml-2">ניתוח ציור</label>
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <label for="prompts-select" class="block font-semibold mb-1">הנחיות שמורות:</label>
+                    <div class="flex items-center gap-2">
+                        <select id="prompts-select" class="w-full p-2 border rounded-md bg-gray-50"></select>
+                        <button type="button" id="manage-prompts-btn" class="p-2 bg-gray-200 hover:bg-gray-300 rounded-md" title="ניהול הנחיות שמורות"><i data-lucide="settings-2" class="w-5 h-5 text-gray-600"></i></button>
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <label for="ai-prompt-input" class="block font-semibold mb-1">הנחיה (פרומפט) לאבחון:</label>
+                    <textarea id="ai-prompt-input" rows="8" class="w-full p-2 border rounded-md text-sm"></textarea>
+                </div>
+                <div class="mb-4">
+                    <label for="professions-input" class="block font-semibold mb-1">מיקוד תעסוקתי (אופציונלי):</label>
+                    <input type="text" id="professions-input" placeholder="הפרד מקצועות בפסיק, לדוגמה: הייטק, שיווק, חינוך" class="w-full p-2 border rounded-md">
+                </div>
+                <div class="text-left mt-6">
+                    <button type="submit" id="generate-ai-report-btn" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 font-bold flex items-center justify-center min-w-[150px] h-[40px]">
+                        <span class="button-text">הפק ושמור דוח</span>
+                        <div class="pulsing-loader hidden"></div>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="prompts-modal" class="modal-overlay hidden">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-4xl transform transition-all" dir="rtl">
+            <div class="flex justify-between items-center border-b pb-3 mb-4">
+                <h3 class="text-2xl font-bold text-gray-800">ניהול הנחיות שמורות</h3>
+                <button id="close-prompts-modal-btn" class="text-gray-500 hover:text-gray-800 text-3xl">&times;</button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <h4 class="font-semibold mb-2 text-lg">רשימת ההנחיות</h4>
+                    <div id="prompts-list" class="space-y-2 border rounded-md p-2 h-96 overflow-y-auto custom-scrollbar"></div>
+                </div>
+                <div>
+                    <h4 id="prompt-form-title" class="font-semibold mb-2 text-lg">הוספת הנחיה חדשה</h4>
+                    <form id="prompt-form">
+                        <input type="hidden" id="prompt-edit-index">
+                        <div class="mb-3">
+                            <label for="prompt-name-input" class="block text-sm font-medium text-gray-700">שם ההנחיה (לזיהוי קל):</label>
+                            <input type="text" id="prompt-name-input" class="mt-1 p-2 w-full border rounded-md" placeholder="לדוגמה: אבחון קצר" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="prompt-text-input" class="block text-sm font-medium text-gray-700">תוכן ההנחיה:</label>
+                            <textarea id="prompt-text-input" rows="10" class="mt-1 p-2 w-full border rounded-md" required></textarea>
+                        </div>
+                        <div class="flex items-center justify-end gap-3 mt-4">
+                             <button type="button" id="prompt-form-cancel" class="text-sm text-gray-600 hover:text-gray-900 hidden">ביטול עריכה</button>
+                            <button type="submit" id="save-prompt-btn" class="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 font-bold">שמור הנחיה</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="refine-modal" class="modal-overlay hidden">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-4xl transform transition-all" dir="rtl">
+            <div class="flex justify-between items-center border-b pb-3 mb-4">
+                <h3 class="text-2xl font-bold text-gray-800 flex items-center"><i data-lucide="filter" class="ml-3 text-indigo-500"></i>מיקוד ודיוק הדוח</h3>
+                <button id="close-refine-modal-btn" class="text-gray-500 hover:text-gray-800 text-3xl">&times;</button>
+            </div>
+            <form id="refine-form">
+                <div class="mb-4">
+                    <label class="block font-semibold mb-1">הדוח הנוכחי (לקריאה בלבד):</label>
+                    <textarea id="current-report-display" rows="10" class="w-full p-2 border rounded-md text-sm bg-gray-100" readonly></textarea>
+                </div>
+                <div class="mb-4">
+                    <label for="refinement-prompt-input" class="block font-semibold mb-1">מה תרצה למקד, לשנות או להוסיף?</label>
+                    <textarea id="refinement-prompt-input" rows="5" class="w-full p-2 border rounded-md text-sm" placeholder="לדוגמה: הרחב בבקשה על יכולות ניהול הצוות של הנבחן/ת, או התמקד יותר בתחום השיווקי." required></textarea>
+                </div>
+                <div class="text-left mt-6">
+                    <button type="submit" id="submit-refinement-btn" class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 font-bold flex items-center justify-center min-w-[150px] h-[40px]">
+                        <span class="button-text">עדכן דוח</span>
+                        <div class="pulsing-loader hidden"></div>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // --- CONFIGURATION ---
+    const SCRIPT_URL = "הדבק-כאן-את-כתובת-הפריסה-של-הסקריפט-שלך"; // ❗ חובה לעדכן
+
+    // --- GLOBAL VARIABLES ---
+    const appContainer = document.getElementById('app');
+    const tokenModal = document.getElementById('token-modal');
+    const tokenInput = document.getElementById('token-input');
+    const saveTokenBtn = document.getElementById('save-token-btn');
+    const mainContent = document.getElementById('main-content');
+    const examineeList = document.getElementById('examinee-list');
+    const searchInput = document.getElementById('search-input');
+    const aiModal = document.getElementById('ai-modal');
+    const aiForm = document.getElementById('ai-form');
+    const aiPromptInput = document.getElementById('ai-prompt-input');
+    const closeAiModalBtn = document.getElementById('close-ai-modal-btn');
+    const refineModal = document.getElementById('refine-modal');
+    const refineForm = document.getElementById('refine-form');
+    const currentReportDisplay = document.getElementById('current-report-display');
+    const refinementPromptInput = document.getElementById('refinement-prompt-input');
+    const closeRefineModalBtn = document.getElementById('close-refine-modal-btn');
+    const promptsModal = document.getElementById('prompts-modal');
+    const promptsSelect = document.getElementById('prompts-select');
+    const managePromptsBtn = document.getElementById('manage-prompts-btn');
+    const closePromptsModalBtn = document.getElementById('close-prompts-modal-btn');
+    const promptsListContainer = document.getElementById('prompts-list');
+    const promptForm = document.getElementById('prompt-form');
+    const promptFormTitle = document.getElementById('prompt-form-title');
+    const promptEditRowInput = document.getElementById('prompt-edit-index');
+    const promptNameInput = document.getElementById('prompt-name-input');
+    const promptTextInput = document.getElementById('prompt-text-input');
+    const cancelEditBtn = document.getElementById('prompt-form-cancel');
+
+    let currentUser = null; 
+    let allExamineesData = [];
+    let savedPrompts = [];
+    let userAccessToken = null;
+    let currentFilter = 'all';
+    const STATUS_MAP = { 'חדשה': { color: 'bg-blue-500' }, 'נבדקה': { color: 'bg-green-500' }, 'דורשת מעקב': { color: 'bg-orange-500' } };
+
+    // --- API CALLER ---
+    async function callAppsScript(action, payload = {}) {
+        if (!userAccessToken) {
+            showToast("שגיאה: טוקן גישה לא קיים.");
+            throw new Error("Access token is missing.");
+        }
+        const requestBody = { token: userAccessToken, action, payload };
+        try {
+            const response = await fetch(SCRIPT_URL, {
+                method: 'POST',
+                mode: 'cors',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(requestBody),
+                redirect: 'follow'
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+            }
+            const result = await response.json();
+            if (result && result.success === false) {
+                throw new Error(result.error || 'An unknown server error occurred.');
+            }
+            return result;
+        } catch (error) {
+            showToast(`שגיאת תקשורת עם השרת: ${error.message}`);
+            throw error;
+        }
+    }
+    
+    // --- UTILITY & UI FUNCTIONS ---
+    function showWelcomeMessage() { mainContent.innerHTML = '<div class="flex flex-col items-center justify-center h-full text-center"><i data-lucide="users" class="w-20 h-20 text-gray-300 mb-4"></i><h1 class="text-3xl font-bold text-gray-700">מערכת ניהול נבחנות</h1><p class="text-gray-500 mt-2 text-lg">נא לבחור נבחנת מהרשימה.</p></div>'; lucide.createIcons(); }
+    function copyToClipboard(text) { navigator.clipboard.writeText(text).then(() => showToast('הועתק ללוח!')); }
+    function showToast(message) { const toast = document.getElementById('toast'); toast.textContent = message; toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 3000); }
+
+    // --- DATA RENDERING ---
+    function renderExamineeList() {
+        const listLoader = document.getElementById('list-loader-container');
+        if(listLoader) listLoader.style.display = 'none';
+        let filteredData = allExamineesData.filter(e => currentFilter === 'all' || e.status === currentFilter);
+        const searchTerm = searchInput.value.toLowerCase();
+        if (searchTerm) {
+            filteredData = filteredData.filter(e => e.name.toLowerCase().includes(searchTerm));
+        }
+        examineeList.innerHTML = filteredData.length === 0 
+            ? '<p class="text-gray-500 text-center p-4">לא נמצאו נבחנות.</p>'
+            : filteredData.map(examinee => {
+                const statusInfo = STATUS_MAP[examinee.status] || { color: 'bg-gray-400' };
+                return `<button data-id="${examinee.id}" class="examinee-btn w-full text-right p-3 my-1 rounded-lg hover:bg-blue-100 focus:bg-blue-200 focus:outline-none transition-all duration-200 flex items-center"><span class="w-3 h-3 ${statusInfo.color} rounded-full ml-3 flex-shrink-0"></span><span>${examinee.name}</span></button>`;
+            }).join('');
+    }
+
+    function renderExamineeDetails(examinee) {
+        const canEdit = currentUser && (currentUser.role === 'מנהל-על' || currentUser.role === 'לקוח');
+        const statusOptions = Object.keys(STATUS_MAP).map(status => `<option value="${status}" ${examinee.status === status ? 'selected' : ''}>${status}</option>`).join('');
+        let reportButtonsHtml = '';
+        if (examinee.diagnosticReport) {
+            reportButtonsHtml = `
+                <button id="refine-report-btn" class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold"><i data-lucide="filter" class="inline-block w-4 h-4 ml-2"></i>מקד את הדוח</button>
+                <button id="edit-doc-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold"><i data-lucide="file-pen-line" class="inline-block w-4 h-4 ml-2"></i>ערוך דוח</button>
+                <button id="send-pdf-btn" class="bg-teal-600 text-white px-4 py-2 rounded-lg font-semibold"><i data-lucide="send" class="inline-block w-4 h-4 ml-2"></i>שלח דוח למייל</button>
+            `;
+        }
+        const answersHtml = examinee.answers.map(group => {
+            const rowspan = group.answers.length > 1 ? `rowspan="${group.answers.length}"` : '';
+            let rowsHtml = `<tr><td ${rowspan}>${group.question}</td><td>${group.answers[0]}</td></tr>`;
+            for (let i = 1; i < group.answers.length; i++) {
+                rowsHtml += `<tr><td>${group.answers[i]}</td></tr>`;
+            }
+            return rowsHtml;
+        }).join('');
+        mainContent.innerHTML = `
+            <div class="bg-white p-6 rounded-xl shadow-md mb-6">
+                <h3 class="text-2xl font-bold text-gray-800 border-b pb-4 mb-4">פרטי הנבחנת</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div><i data-lucide="user" class="inline-block -mt-1 ml-2 text-gray-400"></i><b>שם:</b> ${examinee.name}</div>
+                    <div><i data-lucide="phone" class="inline-block -mt-1 ml-2 text-gray-400"></i><b>טלפון:</b> ${examinee.phone}</div>
+                    <div class="flex items-center"><i data-lucide="mail" class="inline-block -mt-1 ml-2 text-gray-400"></i><b>מייל:</b> ${examinee.email} <button class="copy-btn ml-3" data-copy="${examinee.email}"><i data-lucide="copy" class="w-4 h-4 text-gray-400"></i></button></div>
+                    <div><label for="status-select" class="font-bold">סטטוס:</label><select id="status-select" class="p-1 border rounded-md" ${!canEdit ? 'disabled' : ''}>${statusOptions}</select></div>
+                </div>
+                <div class="mt-4"><h4 class="font-bold">הערות:</h4><textarea id="notes-area" class="w-full p-2 border rounded-md mt-1" rows="4" ${!canEdit ? 'readonly' : ''}>${examinee.notes}</textarea></div>
+                <div class="mt-4 flex flex-wrap justify-end gap-2">
+                    ${canEdit ? reportButtonsHtml : ''}
+                    ${canEdit ? '<button id="ai-modal-btn" class="bg-purple-600 text-white px-4 py-2 rounded-lg font-semibold"><i data-lucide="brain-circuit" class="inline-block w-4 h-4 ml-2"></i>הפק/עדכן דוח אבחון</button>' : ''}
+                    ${canEdit ? '<button id="save-notes-btn" class="bg-green-600 text-white px-4 py-2 rounded-lg font-semibold"><i data-lucide="save" class="inline-block w-4 h-4 ml-2"></i>שמור שינויים</button>' : ''}
+                </div>
+            </div>
+            <div class="bg-white p-6 rounded-xl shadow-md">
+                <h3 class="text-2xl font-bold text-gray-800 border-b pb-4 mb-4">תשובות</h3>
+                <div class="overflow-auto" style="max-height: 50vh;">
+                    <table class="min-w-full answers-table"><thead class="bg-gray-50 sticky top-0"><tr><th>שאלה</th><th>תשובה</th></tr></thead><tbody>${answersHtml}</tbody></table>
+                </div>
+            </div>`;
+        lucide.createIcons();
+        mainContent.querySelector('.copy-btn')?.addEventListener('click', e => copyToClipboard(e.currentTarget.dataset.copy));
+        if (canEdit) {
+            mainContent.querySelector('#save-notes-btn')?.addEventListener('click', () => saveExamineeData(examinee));
+            mainContent.querySelector('#ai-modal-btn')?.addEventListener('click', () => openAiModal(examinee));
+            if (examinee.diagnosticReport) {
+                mainContent.querySelector('#refine-report-btn')?.addEventListener('click', () => openRefineModal(examinee));
+                mainContent.querySelector('#edit-doc-btn')?.addEventListener('click', () => window.open(examinee.docUrl, '_blank'));
+                mainContent.querySelector('#send-pdf-btn')?.addEventListener('click', () => handleSendPdf(examinee));
+            }
+        }
+    }
+
+    // --- SERVER CALLS & EVENT HANDLERS (Refactored for Tokens) ---
+    async function saveExamineeData(examinee) {
+        const newStatus = mainContent.querySelector('#status-select').value;
+        const newNotes = mainContent.querySelector('#notes-area').value;
+        showToast("שומר...");
+        try {
+            await callAppsScript('updateExamineeData', { colIndex: examinee.id, status: newStatus, notes: newNotes });
+            showToast("נשמר בהצלחה!");
+            const localExaminee = allExamineesData.find(e => e.id === examinee.id);
+            if(localExaminee) {
+                localExaminee.status = newStatus;
+                localExaminee.notes = newNotes;
+            }
+            renderExamineeList();
+        } catch (error) {
+            showToast("שגיאה בשמירה: " + error.message);
+        }
+    }
+
+    async function handleSendPdf(examinee) {
+        const btn = mainContent.querySelector('#send-pdf-btn');
+        btn.disabled = true; showToast("מכין PDF ושולח מייל...");
+        try {
+            await callAppsScript('sendReportAsPdf', { recipient: examinee.email, examineeName: examinee.name, docUrl: examinee.docUrl });
+            showToast('דוח האבחון נשלח בהצלחה!');
+        } catch(error) {
+            showToast('שגיאה בשליחת המייל: ' + error.message);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    // --- INITIALIZATION & AUTHENTICATION ---
+    function init() {
+        lucide.createIcons();
+        userAccessToken = localStorage.getItem('examinee_management_token');
+        if (!userAccessToken) {
+            tokenModal.classList.remove('hidden');
+        } else {
+            loadInitialData();
+        }
+    }
+
+    async function loadInitialData() {
+        tokenModal.classList.add('hidden');
+        appContainer.classList.remove('hidden');
+        showWelcomeMessage();
+        const loader = document.getElementById('list-loader-container');
+        if(loader) loader.style.display = 'flex';
+
+        try {
+            const dataResponse = await callAppsScript('getSheetData');
+            allExamineesData = dataResponse.data;
+            currentUser = dataResponse.user;
+            document.getElementById('user-info-display').innerHTML = `שלום, <b>${currentUser.name}</b> (${currentUser.role})`;
+            document.getElementById('user-info-display').style.display = 'block';
+            renderExamineeList();
+        } catch (error) {
+            mainContent.innerHTML = `<div class="text-red-600 p-4">שגיאה בטעינת הנתונים: ${error.message}. ודא שהטוקן שלך תקין.</div>`;
+            localStorage.removeItem('examinee_management_token');
+            appContainer.classList.add('hidden');
+            tokenModal.classList.remove('hidden');
+        } finally {
+            if(loader) loader.style.display = 'none';
+        }
+    }
+
+    saveTokenBtn.addEventListener('click', () => {
+        const token = tokenInput.value.trim();
+        if (token) {
+            localStorage.setItem('examinee_management_token', token);
+            userAccessToken = token;
+            loadInitialData();
+        } else {
+            showToast("אנא הדבק טוקן חוקי.");
+        }
+    });
+    
+    examineeList.addEventListener('click', (e) => {
+        const button = e.target.closest('.examinee-btn');
+        if (button) {
+            const examineeId = parseInt(button.dataset.id, 10);
+            const examinee = allExamineesData.find(ex => ex.id === examineeId);
+            if (examinee) {
+                renderExamineeDetails(examinee);
+                document.querySelectorAll('.examinee-btn').forEach(btn => btn.classList.remove('bg-blue-200'));
+                button.classList.add('bg-blue-200');
+            }
+        }
+    });
+
+    init();
+});
+</script>
+</body>
+</html>
